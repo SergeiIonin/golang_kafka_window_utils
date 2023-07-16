@@ -1,14 +1,12 @@
 package timewindows
 
 import (
-	"log"
-
 	"github.com/segmentio/kafka-go"
 )
 
-// buffer holding batches of messages, each key is one of a discrete windowId (startMillis + n x timeWindowSizeMillis)
-// and the value is a batch of messages received within that window
-// capacity is the number of batches to hold in memory. If the buffer is full, all records except the last are discarded
+// Buffer holding batches of messages, each key is one of a discrete windowId (startMillis + n x timeWindowSizeMillis)
+// and the value is a batch of messages received within that window.
+// Capacity is the number of batches to hold in memory. If the buffer is full, all records except the last are discarded
 type BatchBuffer struct {
 	underlying           map[int][]kafka.Message
 	startMillis          int
@@ -24,11 +22,6 @@ func CreateBatchBuffer(startMillis int, timeWindowSizeMillis int, capacity int) 
 func (bb *BatchBuffer) GetWindowId(start int, timestamp int, timeWindowSizeMillis int) int {
 	diff := timestamp - start
 	windowId := start + (diff/timeWindowSizeMillis)*timeWindowSizeMillis
-	log.Println("start = ", start)
-	log.Println("timestamp = ", timestamp)
-	log.Println("diff = ", diff)
-	log.Println("windowId = ", windowId)
-
 	return windowId
 }
 
