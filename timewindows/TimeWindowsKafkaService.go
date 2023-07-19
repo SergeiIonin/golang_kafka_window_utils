@@ -3,7 +3,6 @@ package timewindows
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -40,10 +39,10 @@ func (s *TimeWindowsKafkaService) Process() {
 // todo add error channel (?)
 func (s *TimeWindowsKafkaService) Read(ch chan kafka.Message) {
 	for {
-		msg, err := s.kafkaReader.ReadMessage(context.Background())
-		if err != nil {
-			log.Printf("error occurred while reading message: %v", err)
-		}
+		msg, _ := s.kafkaReader.ReadMessage(context.Background())
+		// if err != nil {
+		// 	log.Printf("error occurred while reading message: %v", err)
+		// }
 		ch <- msg
 	}
 }
@@ -69,6 +68,7 @@ func generateMsgFromBatch(windowId int, batch []kafka.Message) kafka.Message {
 	}
 }
 
+// todo maybe we should return pointer to TimeWindowsKafkaService
 func CreateTimeWindowsKafkaService(readerConfig kafka.ReaderConfig, writerConfig kafka.WriterConfig,
 	startTimeMillis int, timeWindowSizeMillis int, capacity int) TimeWindowsKafkaService {
 	reader := kafka.NewReader(readerConfig)

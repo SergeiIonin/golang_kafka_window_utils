@@ -2,18 +2,50 @@ package timewindows
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	tc "github.com/testcontainers/testcontainers-go/modules/compose"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func TestTimeWindowsKafkaService(t *testing.T) {
-	brokers := []string{"localhost:9092"}
+var TEST_ENV string
+var brokers []string
+var conn *kafka.Conn
+var writerMsgsInterval time.Duration
+var readerConfig kafka.ReaderConfig
+var writerConfig kafka.WriterConfig
+var testWriterConfig kafka.WriterConfig
+var testReaderConfig kafka.ReaderConfig
+var service TimeWindowsKafkaService
 
-	conn, err := kafka.DialLeader(context.Background(), "tcp", "localhost:9092", "timewindows", 0)
+func init() {
+	TEST_ENV = os.Getenv("env")
+	if TEST_ENV == "docker" {
+		log.Println("DOCKER ENV is used")
+		pwd, _ := os.Getwd()
+		dockerComposeDir := fmt.Sprintf("%s/%s", pwd, "/docker_test/docker-compose.yaml")
+		kafkaCompose, err := tc.NewDockerCompose(dockerComposeDir)
+		if err != nil {
+			log.Fatal("Failed to create compose: ", err)
+		}
+		go kafkaCompose.Up(context.TODO())
+		err = kafkaCompose.WaitForService("kafka", wait.ForListeningPort("9092")).Up(context.TODO(), tc.Wait(true))
+		if err != nil {
+			log.Fatal("Kafka is not accessible: ", err)
+		}
+
+		defer kafkaCompose.Down(context.TODO())
+	}
+
+	brokers = []string{"127.0.0.1:9092"}
+
+	conn, err := kafka.DialLeader(context.Background(), "tcp", brokers[0], "timewindows", 0)
 	if err != nil {
 		log.Fatal("failed to dial leader:", err)
 	}
@@ -33,9 +65,9 @@ func TestTimeWindowsKafkaService(t *testing.T) {
 
 	conn.CreateTopics(topicConfigs...)
 
-	writerMsgsInterval := 1000 * time.Millisecond
+	writerMsgsInterval = 1000 * time.Millisecond
 
-	readerConfig := kafka.ReaderConfig{
+	readerConfig = kafka.ReaderConfig{
 		Brokers:   brokers,
 		Topic:     "timewindows",
 		Partition: 0,
@@ -43,19 +75,19 @@ func TestTimeWindowsKafkaService(t *testing.T) {
 		MaxBytes:  10e6, // 10MB
 	}
 
-	writerConfig := kafka.WriterConfig{
+	writerConfig = kafka.WriterConfig{
 		Brokers:  brokers,
 		Topic:    "timewindows_aggregated",
 		Balancer: &kafka.LeastBytes{},
 	}
 
-	testWriterConfig := kafka.WriterConfig{
+	testWriterConfig = kafka.WriterConfig{
 		Brokers:  brokers,
 		Topic:    "timewindows",
 		Balancer: &kafka.LeastBytes{},
 	}
 
-	testReaderConfig := kafka.ReaderConfig{
+	testReaderConfig = kafka.ReaderConfig{
 		Brokers:   brokers,
 		Topic:     "timewindows_aggregated",
 		GroupID:   "test_group",
@@ -64,8 +96,11 @@ func TestTimeWindowsKafkaService(t *testing.T) {
 		MaxBytes:  10e6, // 10MB
 	}
 
-	service := CreateTimeWindowsKafkaService(readerConfig, writerConfig, int(time.Now().UnixMilli()), 250, 5)
+	service = CreateTimeWindowsKafkaService(readerConfig, writerConfig, int(time.Now().UnixMilli()), 250, 5)
 	defer service.Close()
+}
+
+func TestTimeWindowsKafkaService(t *testing.T) {
 
 	// produce messages to Kafka and run service aggregating msgs in time windows
 	wgProd := &sync.WaitGroup{}
