@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	"github.com/stretchr/testify/assert"
 	tc "github.com/testcontainers/testcontainers-go/modules/compose"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -24,27 +25,36 @@ var testWriterConfig kafka.WriterConfig
 var testReaderConfig kafka.ReaderConfig
 var service TimeWindowsKafkaService
 
-func init() {
+func TestTimeWindowsKafkaService(t *testing.T) {
 	TEST_ENV = os.Getenv("env")
 	if TEST_ENV == "docker" {
 		log.Println("DOCKER ENV is used")
 		pwd, _ := os.Getwd()
 		dockerComposeDir := fmt.Sprintf("%s/%s", pwd, "/docker_test/docker-compose.yaml")
-		kafkaCompose, err := tc.NewDockerCompose(dockerComposeDir)
+		identifier := tc.StackIdentifier("kafka_timewindow_test")
+		kafkaCompose, err := tc.NewDockerComposeWith(tc.WithStackFiles(dockerComposeDir), identifier)
+
 		if err != nil {
 			log.Fatal("Failed to create compose: ", err)
 		}
-		go kafkaCompose.Up(context.TODO())
-		err = kafkaCompose.WaitForService("kafka", wait.ForListeningPort("9092")).Up(context.TODO(), tc.Wait(true))
+
+		kafkaCompose.Up(context.TODO())
+		t.Cleanup(func() {
+			assert.NoError(t, kafkaCompose.Down(context.Background(), tc.RemoveOrphans(true), tc.RemoveImagesLocal), "compose.Down()")
+		})
+
+		err = kafkaCompose.WaitForService("kafka", wait.ForListeningPort("9092").WithStartupTimeout(30*time.Second)).Up(context.TODO(), tc.Wait(true))
+		//	err = compose.WaitForService("kafka", wait.ForListeningPort("9092")).Up(context.TODO(), tc.Wait(true))
+
 		if err != nil {
 			log.Fatal("Kafka is not accessible: ", err)
 		}
-
-		defer kafkaCompose.Down(context.TODO())
 	}
 
+	log.Println("Dialing Kafka...")
 	brokers = []string{"127.0.0.1:9092"}
 
+	//conn, err := dialKafka(context.Background(), "tcp", brokers[0])
 	conn, err := kafka.DialLeader(context.Background(), "tcp", brokers[0], "timewindows", 0)
 	if err != nil {
 		log.Fatal("failed to dial leader:", err)
@@ -74,19 +84,11 @@ func init() {
 		MinBytes:  10e3, // 10KB
 		MaxBytes:  10e6, // 10MB
 	}
-
 	writerConfig = kafka.WriterConfig{
 		Brokers:  brokers,
 		Topic:    "timewindows_aggregated",
 		Balancer: &kafka.LeastBytes{},
 	}
-
-	testWriterConfig = kafka.WriterConfig{
-		Brokers:  brokers,
-		Topic:    "timewindows",
-		Balancer: &kafka.LeastBytes{},
-	}
-
 	testReaderConfig = kafka.ReaderConfig{
 		Brokers:   brokers,
 		Topic:     "timewindows_aggregated",
@@ -95,17 +97,19 @@ func init() {
 		MinBytes:  10e3, // 10KB
 		MaxBytes:  10e6, // 10MB
 	}
+	testWriterConfig = kafka.WriterConfig{
+		Brokers:  brokers,
+		Topic:    "timewindows",
+		Balancer: &kafka.LeastBytes{},
+	}
 
 	service = CreateTimeWindowsKafkaService(readerConfig, writerConfig, int(time.Now().UnixMilli()), 250, 5)
+
 	defer service.Close()
-}
-
-func TestTimeWindowsKafkaService(t *testing.T) {
-
 	// produce messages to Kafka and run service aggregating msgs in time windows
 	wgProd := &sync.WaitGroup{}
 	wgProd.Add(3)
-	go produce(testWriterConfig, wgProd, writerMsgsInterval)
+	go produce(testWriterConfig, wgProd, writerMsgsInterval, t)
 	go service.Process()
 	wgProd.Wait()
 
@@ -114,7 +118,7 @@ func TestTimeWindowsKafkaService(t *testing.T) {
 	wgCons.Add(1)
 	numMsgs := 3
 	msgs := make([]kafka.Message, numMsgs)
-	go consume(testReaderConfig, numMsgs, msgs, wgCons)
+	go consume(testReaderConfig, numMsgs, msgs, wgCons, t)
 	wgCons.Wait()
 
 	msgsStr := make([]string, numMsgs)
@@ -134,7 +138,7 @@ func TestTimeWindowsKafkaService(t *testing.T) {
 	})
 }
 
-func produce(writerConfig kafka.WriterConfig, wg *sync.WaitGroup, writerMsgsInterval time.Duration) {
+func produce(writerConfig kafka.WriterConfig, wg *sync.WaitGroup, writerMsgsInterval time.Duration, t *testing.T) {
 	w := kafka.NewWriter(writerConfig)
 
 	err := w.WriteMessages(context.Background(),
@@ -188,18 +192,21 @@ func produce(writerConfig kafka.WriterConfig, wg *sync.WaitGroup, writerMsgsInte
 	wg.Done()
 
 	if err != nil {
-		log.Fatal("failed to write messages:", err)
+		log.Println("failed to write messages:", err)
+		t.Failed()
+		//log.Fatal("failed to write messages:", err)
 	}
 }
 
-func consume(readerConfig kafka.ReaderConfig, count int, msgs []kafka.Message, wg *sync.WaitGroup) {
+func consume(readerConfig kafka.ReaderConfig, count int, msgs []kafka.Message, wg *sync.WaitGroup, t *testing.T) {
 	r := kafka.NewReader(readerConfig)
 	max := len(msgs)
 
 	for i := 0; i < max; i++ {
 		m, err := r.ReadMessage(context.Background())
 		if err != nil {
-			log.Fatal("failed to read message:", err)
+			log.Println("failed to read message:", err)
+			t.Failed()
 		}
 		msgs[i] = m
 		log.Printf("message at offset %d: %s = %s\n", m.Offset, string(m.Key), string(m.Value))
