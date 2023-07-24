@@ -16,10 +16,9 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func TestTimeWindowsKafkaService(t *testing.T) {
+func TestTimeWindowsKafkaServicePartitioned(t *testing.T) {
 	var TEST_ENV string
 	var brokers []string
-
 	var writerMsgsInterval time.Duration
 	var readerConfig kafka.ReaderConfig
 	var writerConfig kafka.WriterConfig
@@ -64,7 +63,7 @@ func TestTimeWindowsKafkaService(t *testing.T) {
 	topicConfigs := []kafka.TopicConfig{
 		kafka.TopicConfig{
 			Topic:             "timewindows",
-			NumPartitions:     1,
+			NumPartitions:     3,
 			ReplicationFactor: 1,
 		},
 		kafka.TopicConfig{
@@ -143,7 +142,7 @@ func TestTimeWindowsKafkaService(t *testing.T) {
 		offsets[i] = int(msg.Offset)
 	}
 
-	t.Run("TestTimeWindowsKafkaService", func(t *testing.T) {
+	t.Run("TestTimeWindowsKafkaServicePartitioned", func(t *testing.T) {
 		if len(msgsStr) != numMsgs {
 			t.Errorf("Expected %d messages, got %d", numMsgs, len(msgs))
 		}

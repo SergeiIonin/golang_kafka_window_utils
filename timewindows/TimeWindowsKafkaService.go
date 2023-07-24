@@ -3,6 +3,7 @@ package timewindows
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -25,12 +26,15 @@ func (s *TimeWindowsKafkaService) Process() {
 
 	go s.Read(s.msgChan)
 
+	base := 2500
+	timeoutDur := time.Duration(base) * time.Millisecond // todo make configurable bc it depends on timeWindowSizeMillis
+
 	for {
 		select {
 		case msg := <-s.msgChan:
 			s.batchBuffer.AddToBatch(msg, s.onBatchClear)
 			// time duration of N time windows
-		case <-time.After(time.Duration(10 * s.batchBuffer.timeWindowSizeMillis)):
+		case <-time.After(timeoutDur):
 			s.batchBuffer.ClearBuffer(s.onBatchClear, true)
 		}
 	}
@@ -39,10 +43,10 @@ func (s *TimeWindowsKafkaService) Process() {
 // todo add error channel (?)
 func (s *TimeWindowsKafkaService) Read(ch chan kafka.Message) {
 	for {
-		msg, _ := s.kafkaReader.ReadMessage(context.Background())
-		// if err != nil {
-		// 	log.Printf("error occurred while reading message: %v", err)
-		// }
+		msg, err := s.kafkaReader.ReadMessage(context.Background())
+		if err != nil {
+			log.Printf("[TWKS] error occurred while reading message: %v", err)
+		}
 		ch <- msg
 	}
 }
