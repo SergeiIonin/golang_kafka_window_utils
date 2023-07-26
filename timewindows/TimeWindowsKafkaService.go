@@ -2,8 +2,11 @@ package timewindows
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -24,6 +27,8 @@ func (s *TimeWindowsKafkaService) onBatchClear(windowId int, batch []kafka.Messa
 
 func (s *TimeWindowsKafkaService) Process() {
 
+	mutex := &sync.Mutex{}
+
 	go s.Read(s.msgChan)
 
 	base := 2500
@@ -35,7 +40,9 @@ func (s *TimeWindowsKafkaService) Process() {
 			s.batchBuffer.AddToBatch(msg, s.onBatchClear)
 			// time duration of N time windows
 		case <-time.After(timeoutDur):
+			mutex.Lock()
 			s.batchBuffer.ClearBuffer(s.onBatchClear, true)
+			mutex.Unlock()
 		}
 	}
 }
@@ -44,16 +51,29 @@ func (s *TimeWindowsKafkaService) Process() {
 func (s *TimeWindowsKafkaService) Read(ch chan kafka.Message) {
 	for {
 		msg, err := s.kafkaReader.ReadMessage(context.Background())
-		if err != nil {
-			log.Printf("[TWKS] error occurred while reading message: %v", err)
+		// check if the error is EOF using errors.Is
+		if errors.Is(err, io.EOF) {
+			log.Printf("[TWKS] reached EOF, reader has been closed")
+			break
 		}
+
 		ch <- msg
 	}
 }
 
-func (s *TimeWindowsKafkaService) Close() {
-	s.kafkaReader.Close()
-	s.kafkaWriter.Close()
+func (s *TimeWindowsKafkaService) Close() error {
+	err := s.kafkaReader.Close()
+	if err != nil {
+		log.Printf("[TWKS] error occurred while closing kafka reader: %v", err)
+		return err
+	}
+	err = s.kafkaWriter.Close()
+	if err != nil {
+		log.Printf("[TWKS] error occurred while closing kafka writer: %v", err)
+		return err
+
+	}
+	return nil
 }
 
 func generateMsgFromBatch(windowId int, batch []kafka.Message) kafka.Message {
@@ -74,10 +94,10 @@ func generateMsgFromBatch(windowId int, batch []kafka.Message) kafka.Message {
 
 // todo maybe we should return pointer to TimeWindowsKafkaService
 func CreateTimeWindowsKafkaService(readerConfig kafka.ReaderConfig, writerConfig kafka.WriterConfig,
-	startTimeMillis int, timeWindowSizeMillis int, capacity int) TimeWindowsKafkaService {
+	startTimeMillis int, timeWindowSizeMillis int, capacity int) *TimeWindowsKafkaService {
 	reader := kafka.NewReader(readerConfig)
 	writer := kafka.NewWriter(writerConfig)
 	batchBuffer := CreateBatchBuffer(startTimeMillis, timeWindowSizeMillis, capacity)
 	msgChan := make(chan kafka.Message)
-	return TimeWindowsKafkaService{reader, writer, batchBuffer, msgChan}
+	return &TimeWindowsKafkaService{reader, writer, batchBuffer, msgChan}
 }

@@ -81,6 +81,11 @@ func Produce(writerConfig kafka.WriterConfig, wg *sync.WaitGroup, writerMsgsInte
 		t.Failed()
 		//log.Fatal("failed to write messages:", err)
 	}
+	err = w.Close()
+	if err != nil {
+		log.Println("[producer] failed to close writer:", err)
+		t.Failed()
+	}
 }
 
 func Consume(readerConfig kafka.ReaderConfig, count int, msgs []kafka.Message, wg *sync.WaitGroup, t *testing.T) {
@@ -97,6 +102,12 @@ func Consume(readerConfig kafka.ReaderConfig, count int, msgs []kafka.Message, w
 		log.Printf("[consumer] message from partition %d, offset %d: %s = %s\n", m.Partition, m.Offset, string(m.Key), string(m.Value))
 	}
 	wg.Done()
+	err := r.Close()
+	if err != nil {
+		log.Println("[consumer] failed to close reader:", err)
+		t.Failed()
+	}
+
 }
 
 func Equals(t *testing.T, msgs []string, expected []string) bool {
