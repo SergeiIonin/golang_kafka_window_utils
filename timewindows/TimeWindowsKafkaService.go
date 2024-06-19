@@ -93,10 +93,9 @@ func generateMsgFromBatch(windowId int, batch []kafka.Message) kafka.Message {
 }
 
 // todo maybe we should return pointer to TimeWindowsKafkaService
-func CreateTimeWindowsKafkaService(readerConfig kafka.ReaderConfig, writerConfig kafka.WriterConfig,
+func CreateTimeWindowsKafkaService(readerConfig kafka.ReaderConfig, writer *kafka.Writer,
 	startTimeMillis int, timeWindowSizeMillis int, capacity int) *TimeWindowsKafkaService {
 	reader := kafka.NewReader(readerConfig)
-	writer := kafka.NewWriter(writerConfig)
 	batchBuffer := CreateBatchBuffer(startTimeMillis, timeWindowSizeMillis, capacity)
 	msgChan := make(chan kafka.Message)
 	return &TimeWindowsKafkaService{reader, writer, batchBuffer, msgChan}

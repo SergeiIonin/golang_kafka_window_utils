@@ -2,20 +2,60 @@ package testutils
 
 import (
 	"context"
+	"github.com/segmentio/kafka-go"
 	"log"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/segmentio/kafka-go"
 )
 
-func Produce(writerConfig kafka.WriterConfig, wg *sync.WaitGroup, writerMsgsInterval time.Duration, t *testing.T) {
-	w := kafka.NewWriter(writerConfig)
+func MakeTestData(name string, brokers []string, topic string, topicAggregated string, partitionsNum int, serviceCG string, testSG string, expectedMsgs []string) TestData {
+	return TestData{
+		Name: name,
+		TopicConfigs: []kafka.TopicConfig{
+			kafka.TopicConfig{
+				Topic:             topic,
+				NumPartitions:     partitionsNum,
+				ReplicationFactor: 1,
+			},
+			kafka.TopicConfig{
+				Topic:             topicAggregated,
+				NumPartitions:     1,
+				ReplicationFactor: 1,
+			},
+		},
+		ReaderConfig: kafka.ReaderConfig{
+			Brokers:  brokers,
+			Topic:    topic,
+			GroupID:  serviceCG,
+			MinBytes: 10e3, // 10KB
+			MaxBytes: 10e6, // 10MB
+		},
+		Writer: &kafka.Writer{
+			Addr:     kafka.TCP(brokers[0]),
+			Topic:    topicAggregated,
+			Balancer: &kafka.LeastBytes{},
+		},
+		TestWriter: &kafka.Writer{
+			Addr:     kafka.TCP(brokers[0]),
+			Topic:    topic,
+			Balancer: &kafka.LeastBytes{},
+		},
+		TestReaderConfig: kafka.ReaderConfig{
+			Brokers:  brokers,
+			Topic:    topicAggregated,
+			GroupID:  testSG,
+			MinBytes: 10e3, // 10KB
+			MaxBytes: 10e6, // 10MB
+		},
+		ExpectedMsgs: expectedMsgs,
+	}
+}
 
+func Produce(writer *kafka.Writer, wg *sync.WaitGroup, writerMsgsInterval time.Duration, t *testing.T) {
 	t0 := time.Now()
 
-	err := w.WriteMessages(context.Background(),
+	err := writer.WriteMessages(context.Background(),
 		kafka.Message{
 			Key:   []byte("Key-A"),
 			Value: []byte("AAA"),
@@ -36,7 +76,7 @@ func Produce(writerConfig kafka.WriterConfig, wg *sync.WaitGroup, writerMsgsInte
 
 	t0 = t0.Add(writerMsgsInterval)
 
-	err = w.WriteMessages(context.Background(),
+	err = writer.WriteMessages(context.Background(),
 		kafka.Message{
 			Key:   []byte("Key-D"),
 			Value: []byte("DDD"),
@@ -57,7 +97,7 @@ func Produce(writerConfig kafka.WriterConfig, wg *sync.WaitGroup, writerMsgsInte
 
 	t0 = t0.Add(writerMsgsInterval)
 
-	err = w.WriteMessages(context.Background(),
+	err = writer.WriteMessages(context.Background(),
 		kafka.Message{
 			Key:   []byte("Key-G"),
 			Value: []byte("GGG"),
@@ -81,19 +121,26 @@ func Produce(writerConfig kafka.WriterConfig, wg *sync.WaitGroup, writerMsgsInte
 		t.Failed()
 		//log.Fatal("failed to write messages:", err)
 	}
-	err = w.Close()
+	err = writer.Close()
 	if err != nil {
 		log.Println("[producer] failed to close writer:", err)
 		t.Failed()
 	}
+
+	defer func() {
+		err := writer.Close()
+		if err != nil {
+			log.Println("[producer] failed to close writer:", err)
+			t.Failed()
+		}
+	}()
 }
 
-func Consume(readerConfig kafka.ReaderConfig, count int, msgs []kafka.Message, wg *sync.WaitGroup, t *testing.T) {
-	r := kafka.NewReader(readerConfig)
+func Consume(reader *kafka.Reader, count int, msgs []kafka.Message, wg *sync.WaitGroup, t *testing.T) {
 	max := len(msgs)
 
 	for i := 0; i < max; i++ {
-		m, err := r.ReadMessage(context.Background())
+		m, err := reader.ReadMessage(context.Background())
 		if err != nil {
 			log.Println("failed to read message:", err)
 			t.Failed()
@@ -102,12 +149,13 @@ func Consume(readerConfig kafka.ReaderConfig, count int, msgs []kafka.Message, w
 		log.Printf("[consumer] message from partition %d, offset %d: %s = %s\n", m.Partition, m.Offset, string(m.Key), string(m.Value))
 	}
 	wg.Done()
-	err := r.Close()
-	if err != nil {
-		log.Println("[consumer] failed to close reader:", err)
-		t.Failed()
-	}
-
+	defer func() {
+		err := reader.Close()
+		if err != nil {
+			log.Println("[consumer] failed to close reader:", err)
+			t.Failed()
+		}
+	}()
 }
 
 func Equals(t *testing.T, msgs []string, expected []string) bool {
@@ -129,12 +177,13 @@ func Equals(t *testing.T, msgs []string, expected []string) bool {
 	return true
 }
 
+// what is the purpose exactly?
 func Contains(t *testing.T, msgs []string, expected []string) bool {
 	if len(msgs) != len(expected) {
 		return false
 	}
 	msgsRunes := make([][]rune, len(msgs))
-	for i, msg := range msgs { 
+	for i, msg := range msgs {
 		msgsRunes[i] = []rune(msg)
 	}
 	expectedRunes := make([][]rune, len(expected))
