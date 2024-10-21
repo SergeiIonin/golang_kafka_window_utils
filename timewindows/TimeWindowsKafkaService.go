@@ -32,16 +32,18 @@ func (s *TimeWindowsKafkaService) Process() {
 	go s.Read(s.msgChan)
 
 	base := 2500
-	timeoutDur := time.Duration(base) * time.Millisecond // todo make configurable bc it depends on timeWindowSizeMillis
+	timerDuration := time.Duration(base) * time.Millisecond // todo make configurable bc it depends on timeWindowSizeMillis
+	timer := time.NewTimer(timerDuration)
 
 	for {
 		select {
 		case msg := <-s.msgChan:
 			s.batchBuffer.AddToBatch(msg, s.onBatchClear)
 			// time duration of N time windows
-		case <-time.After(timeoutDur):
+		case <-timer.C:
 			mutex.Lock()
 			s.batchBuffer.ClearBuffer(s.onBatchClear, true)
+			timer.Reset(timerDuration)
 			mutex.Unlock()
 		}
 	}
