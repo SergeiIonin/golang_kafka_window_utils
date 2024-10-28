@@ -50,6 +50,36 @@ func GetOffsetsPerTopic(messages []kafka.Message) map[string][]int64 {
 	return offsetsPerTopic
 }
 
+func waitKafkaIsUp() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	kafkaClient := &kafka.Client{
+		Addr:      kafkaAddr,
+		Transport: nil,
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			cancel()
+			return ctx.Err()
+		default:
+			log.Println("WAITING FOR KAFKA TO BE READY...")
+			// for some reason Heartbeat request is not enough: even if it's successful,
+			// the client may fail to creata topic
+			resp, err := kafkaClient.Metadata(ctx, &kafka.MetadataRequest{
+				Addr: kafkaAddr,
+			})
+			if resp == nil || err != nil {
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			cancel()
+			return nil
+		}
+	}
+}
+
 func CleanupAndGracefulShutdown(t *testing.T, dockerClient *client.Client, containerId string) {
 	if err := dockerClient.ContainerRemove(context.Background(), containerId, container.RemoveOptions{Force: true}); err != nil {
 		t.Fatalf("could not remove container %v, consider deleting it manually!", err)
@@ -83,20 +113,15 @@ func CreateKafkaWithKRaftContainer(dockerClient *client.Client) (id string, err 
 		panic(err)
 	}
 
-	if err := dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+	if err = dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		panic(err)
 	}
 
-	log.Println("WAITING...")
+	log.Println("WAITING FOR KAFKA CONTAINER TO START...")
 
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	// fixme
-	go func() {
-		time.Sleep(7 * time.Second)
-		wg.Done()
-	}()
-	wg.Wait()
+	if err = waitKafkaIsUp(); err != nil {
+		panic(err)
+	}
 
 	return resp.ID, nil
 }
