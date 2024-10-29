@@ -28,25 +28,37 @@ func MakeTestData(name string, brokers []string, topic string, topicAggregated s
 			Brokers:  brokers,
 			Topic:    topic,
 			GroupID:  serviceCG,
-			MinBytes: 10e3, // 10KB
+			MinBytes: 1, // 1B
 			MaxBytes: 10e6, // 10MB
+			ReadBackoffMin: 5 * time.Millisecond,
+			ReadBackoffMax: 10 * time.Millisecond,
+			StartOffset:    kafka.FirstOffset,
 		},
 		Writer: &kafka.Writer{
 			Addr:     kafka.TCP(brokers[0]),
 			Topic:    topicAggregated,
-			Balancer: &kafka.LeastBytes{},
+			WriteBackoffMin: 1 * time.Millisecond,
+			WriteBackoffMax: 5 * time.Millisecond,
+			BatchTimeout:    1 * time.Millisecond,
+			Balancer:        &kafka.RoundRobin{},
 		},
 		TestWriter: &kafka.Writer{
 			Addr:     kafka.TCP(brokers[0]),
 			Topic:    topic,
-			Balancer: &kafka.LeastBytes{},
+			WriteBackoffMin: 1 * time.Millisecond,
+			WriteBackoffMax: 5 * time.Millisecond,
+			BatchTimeout:    1 * time.Millisecond,
+			Balancer:        &kafka.RoundRobin{},
 		},
 		TestReaderConfig: kafka.ReaderConfig{
 			Brokers:  brokers,
 			Topic:    topicAggregated,
 			GroupID:  testSG,
-			MinBytes: 10e3, // 10KB
+			MinBytes: 1, // 1B
 			MaxBytes: 10e6, // 10MB
+			ReadBackoffMin: 5 * time.Millisecond,
+			ReadBackoffMax: 10 * time.Millisecond,
+			StartOffset:    kafka.FirstOffset,
 		},
 		ExpectedMsgs: expectedMsgs,
 	}
@@ -55,6 +67,7 @@ func MakeTestData(name string, brokers []string, topic string, topicAggregated s
 func Produce(writer *kafka.Writer, wg *sync.WaitGroup, writerMsgsInterval time.Duration, t *testing.T) {
 	t0 := time.Now()
 
+	log.Printf("[producer] starting to write messages at %s\n", t0)
 	err := writer.WriteMessages(context.Background(),
 		kafka.Message{
 			Key:   []byte("Key-A"),
@@ -76,6 +89,7 @@ func Produce(writer *kafka.Writer, wg *sync.WaitGroup, writerMsgsInterval time.D
 
 	t0 = t0.Add(writerMsgsInterval)
 
+	log.Printf("[producer] starting to write messages at %s\n", t0)
 	err = writer.WriteMessages(context.Background(),
 		kafka.Message{
 			Key:   []byte("Key-D"),
@@ -97,6 +111,7 @@ func Produce(writer *kafka.Writer, wg *sync.WaitGroup, writerMsgsInterval time.D
 
 	t0 = t0.Add(writerMsgsInterval)
 
+	log.Printf("[producer] starting to write messages at %s\n", t0)
 	err = writer.WriteMessages(context.Background(),
 		kafka.Message{
 			Key:   []byte("Key-G"),
@@ -136,7 +151,8 @@ func Produce(writer *kafka.Writer, wg *sync.WaitGroup, writerMsgsInterval time.D
 	}()
 }
 
-func Consume(reader *kafka.Reader, count int, msgs []kafka.Message, wg *sync.WaitGroup, t *testing.T) {
+// fixme either consume 3 messages or exit due to timeout
+func Consume(reader *kafka.Reader, msgs []kafka.Message, wg *sync.WaitGroup, t *testing.T) {
 	max := len(msgs)
 
 	for i := 0; i < max; i++ {

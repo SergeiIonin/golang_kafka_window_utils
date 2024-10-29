@@ -33,8 +33,8 @@ func (bb *BatchBuffer) AddToBatch(msg kafka.Message, onBatchClear func(int, []ka
 		bb.ClearBuffer(onBatchClear, false)
 	}
 	windowId := bb.GetWindowId(bb.startMillis, int(msg.Time.UnixMilli()), bb.timeWindowSizeMillis)
-	log.Printf("[BatchBuffer] adding kafka msg %s to buffer for key %d; number of msgs for %d is %d, size of buffer is %d", string(msg.Value), windowId, windowId, len(bb.underlying[windowId]), len(bb.underlying))
 	bb.underlying[windowId] = append(bb.underlying[windowId], msg)
+	log.Printf("[BatchBuffer] adding kafka msg %s to buffer for key %d; number of msgs for %d is %d, size of buffer is %d", string(msg.Value), windowId, windowId, len(bb.underlying[windowId]), len(bb.underlying))
 }
 
 // either removes all batches on timeout (it means that we are not receiving any new messages long enough and we should clear the buffer)
