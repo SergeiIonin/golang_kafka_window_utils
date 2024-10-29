@@ -1,17 +1,11 @@
 package testutils
 
 import (
-	"context"
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
 	"github.com/segmentio/kafka-go"
 	"log"
 	"strconv"
 	"strings"
-	"sync"
-	"testing"
-	"time"
 )
 
 var (
@@ -48,80 +42,4 @@ func GetOffsetsPerTopic(messages []kafka.Message) map[string][]int64 {
 	}
 	log.Printf("Offsets per topic: %v", offsetsPerTopic)
 	return offsetsPerTopic
-}
-
-func waitKafkaIsUp() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-
-	kafkaClient := &kafka.Client{
-		Addr:      kafkaAddr,
-		Transport: nil,
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			cancel()
-			return ctx.Err()
-		default:
-			log.Println("WAITING FOR KAFKA TO BE READY...")
-			// for some reason Heartbeat request is not enough: even if it's successful,
-			// the client may fail to creata topic
-			resp, err := kafkaClient.Metadata(ctx, &kafka.MetadataRequest{
-				Addr: kafkaAddr,
-			})
-			if resp == nil || err != nil {
-				time.Sleep(1 * time.Second)
-				continue
-			}
-			cancel()
-			return nil
-		}
-	}
-}
-
-func CleanupAndGracefulShutdown(t *testing.T, dockerClient *client.Client, containerId string) {
-	if err := dockerClient.ContainerRemove(context.Background(), containerId, container.RemoveOptions{Force: true}); err != nil {
-		t.Fatalf("could not remove container %v, consider deleting it manually!", err)
-	}
-}
-
-func CreateKafkaWithKRaftContainer(dockerClient *client.Client) (id string, err error) {
-	ctx := context.Background()
-
-	config := &container.Config{
-		Image: "apache/kafka:3.7.0",
-		ExposedPorts: nat.PortSet{
-			"9092": struct{}{},
-		},
-		Tty: false,
-	}
-
-	hostConfig := &container.HostConfig{
-		PortBindings: nat.PortMap{
-			"9092": []nat.PortBinding{
-				{
-					HostIP:   "0.0.0.0",
-					HostPort: "9092",
-				},
-			},
-		},
-	}
-
-	resp, err := dockerClient.ContainerCreate(ctx, config, hostConfig, nil, nil, "kafka")
-	if err != nil {
-		panic(err)
-	}
-
-	if err = dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		panic(err)
-	}
-
-	log.Println("WAITING FOR KAFKA CONTAINER TO START...")
-
-	if err = waitKafkaIsUp(); err != nil {
-		panic(err)
-	}
-
-	return resp.ID, nil
 }

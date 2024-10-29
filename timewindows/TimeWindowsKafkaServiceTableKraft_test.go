@@ -34,6 +34,7 @@ var (
 	log.Printf("Container ID: %s", containerId)
 }*/
 
+// fixme add homemade test container for kafka
 func TestTWKSTableKraft_test(t *testing.T) {
 	/*cleanup := func() {
 		testutils.CleanupAndGracefulShutdown(t, dockerClient, containerId)
