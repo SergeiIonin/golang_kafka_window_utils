@@ -3,15 +3,14 @@ package testutils
 import (
 	"context"
 	"log"
+	"net"
 	"testing"
 	"time"
-	"net"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/segmentio/kafka-go"
-
 )
 
 // Creates a Kafka container in KRaft mode
