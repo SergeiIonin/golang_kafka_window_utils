@@ -12,8 +12,9 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// This implementation just writes batches to other kafka topic. Messages within a batch are all produced as a single message under the same key.
-// This key is the windowId of the type startMillis + n x timeWindowSizeMillis.
+// A service which composes a new Kafka message out of the batch of messages collected within the time window.
+// Next, new message is written to the special topic.
+// New massage key is the windowId of the type startMillis + n x timeWindowSizeMillis.
 type TimeWindowsKafkaService struct {
 	kafkaReader *kafka.Reader
 	kafkaWriter *kafka.Writer
@@ -21,15 +22,24 @@ type TimeWindowsKafkaService struct {
 	msgChan     chan kafka.Message
 }
 
+// Create a new TimeWindowsKafkaService with the given Kafka reader and writer, start time in milliseconds, time window size in milliseconds and capacity.
+func CreateTimeWindowsKafkaService(readerConfig kafka.ReaderConfig, writer *kafka.Writer,
+	startTimeMillis int, timeWindowSizeMillis int, capacity int) *TimeWindowsKafkaService {
+	reader := kafka.NewReader(readerConfig)
+	batchBuffer := CreateBatchBuffer(startTimeMillis, timeWindowSizeMillis, capacity)
+	msgChan := make(chan kafka.Message)
+	return &TimeWindowsKafkaService{reader, writer, batchBuffer, msgChan}
+}
+
 func (s *TimeWindowsKafkaService) onBatchClear(windowId int, batch []kafka.Message) {
 	s.kafkaWriter.WriteMessages(context.Background(), generateMsgFromBatch(windowId, batch))
 }
 
-func (s *TimeWindowsKafkaService) Process() {
-
+// Runs the service which reads messages from Kafka and aggregates them in time windows.
+func (s *TimeWindowsKafkaService) Run() {
 	mutex := &sync.Mutex{}
 
-	go s.Read(s.msgChan)
+	go s.read(s.msgChan)
 
 	base := 2500
 	timerDuration := time.Duration(base) * time.Millisecond // todo make configurable bc it depends on timeWindowSizeMillis
@@ -49,20 +59,7 @@ func (s *TimeWindowsKafkaService) Process() {
 	}
 }
 
-// todo add error channel (?)
-func (s *TimeWindowsKafkaService) Read(ch chan kafka.Message) {
-	for {
-		msg, err := s.kafkaReader.ReadMessage(context.Background())
-		// check if the error is EOF using errors.Is
-		if errors.Is(err, io.EOF) {
-			log.Printf("[TWKS] reached EOF, reader has been closed")
-			break
-		}
-
-		ch <- msg
-	}
-}
-
+// Closes the underlying Kafka reader and writer.
 func (s *TimeWindowsKafkaService) Close() error {
 	err := s.kafkaReader.Close()
 	if err != nil {
@@ -76,6 +73,18 @@ func (s *TimeWindowsKafkaService) Close() error {
 
 	}
 	return nil
+}
+
+func (s *TimeWindowsKafkaService) read(ch chan kafka.Message) { // todo add error channel (?)
+	for {
+		msg, err := s.kafkaReader.ReadMessage(context.Background())
+		if errors.Is(err, io.EOF) {
+			log.Printf("[TWKS] reached EOF, reader has been closed")
+			break
+		}
+
+		ch <- msg
+	}
 }
 
 func generateMsgFromBatch(windowId int, batch []kafka.Message) kafka.Message {
@@ -92,13 +101,4 @@ func generateMsgFromBatch(windowId int, batch []kafka.Message) kafka.Message {
 		}
 		return kafka.Message{Key: key, Value: value}
 	}
-}
-
-// todo maybe we should return pointer to TimeWindowsKafkaService
-func CreateTimeWindowsKafkaService(readerConfig kafka.ReaderConfig, writer *kafka.Writer,
-	startTimeMillis int, timeWindowSizeMillis int, capacity int) *TimeWindowsKafkaService {
-	reader := kafka.NewReader(readerConfig)
-	batchBuffer := CreateBatchBuffer(startTimeMillis, timeWindowSizeMillis, capacity)
-	msgChan := make(chan kafka.Message)
-	return &TimeWindowsKafkaService{reader, writer, batchBuffer, msgChan}
 }

@@ -8,15 +8,15 @@ import (
 	"time"
 
 	"github.com/SergeiIonin/golang_kafka_window_utils/testutils"
+	"github.com/docker/docker/client"
 	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
-	"github.com/docker/docker/client"	
 )
 
 var (
-	kafkaBroker = "localhost:9092"
-	kafkaAddr   = kafka.TCP(kafkaBroker)
-	err         error
+	kafkaBroker  = "localhost:9092"
+	kafkaAddr    = kafka.TCP(kafkaBroker)
+	err          error
 	containerId  string
 	dockerClient *client.Client
 )
@@ -41,7 +41,7 @@ func TestTWKSTableKraft_test(t *testing.T) {
 	}
 
 	//defer cleanup() // fixme it'd be great to rm containers in case t.Cleanup won't affect them
-	
+
 	t.Cleanup(cleanup)
 
 	var service *TimeWindowsKafkaService
@@ -73,7 +73,7 @@ func TestTWKSTableKraft_test(t *testing.T) {
 	testDataMultiplePartitions :=
 		testutils.MakeTestData("multiple partitions test", brokers, "timewindows_multi_part", "timewindows_aggregated_1", 3, "service_group_multi", "test_group_multi", expected)
 
-	allTopicConfigs	:= append(testDataOnePartition.TopicConfigs, testDataMultiplePartitions.TopicConfigs...)
+	allTopicConfigs := append(testDataOnePartition.TopicConfigs, testDataMultiplePartitions.TopicConfigs...)
 
 	numGroupsExpected := len(expected)
 
@@ -87,14 +87,14 @@ func TestTWKSTableKraft_test(t *testing.T) {
 			writer := testData.Writer
 			testWriter := testData.TestWriter
 			testReaderConfig := testData.TestReaderConfig
-	
+
 			service = CreateTimeWindowsKafkaService(readerConfig, writer, int(time.Now().UnixMilli()), 250, 50)
 			// run service aggregating msgs in time windows
-			go service.Process()
-	
+			go service.Run()
+
 			// produce messages to Kafka
 			produceTestMessages(numGroupsExpected, testWriter, writerMsgsInterval, t)
-			
+
 			// consume messages from Kafka timewindows_aggregated
 			msgs := make([]kafka.Message, numGroupsExpected)
 
@@ -106,9 +106,9 @@ func TestTWKSTableKraft_test(t *testing.T) {
 				msgsStr = append(msgsStr, string(msg.Value))
 				offsets = append(offsets, int(msg.Offset))
 			}
-	
+
 			log.Println("received messages = \n", msgsStr)
-	
+
 			if len(msgsStr) != numGroupsExpected {
 				t.Errorf("Expected %d messages, got %d", numGroupsExpected, len(msgs))
 			}
