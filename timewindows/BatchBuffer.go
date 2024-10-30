@@ -23,19 +23,22 @@ func CreateBatchBuffer(startMillis int, timeWindowSizeMillis int, capacity int) 
 }
 
 // Adds a message to the buffer, additionally clearing the buffer if it is full.
-func (bb *BatchBuffer) AddToBatch(msg kafka.Message, onBatchClear func(int, []kafka.Message)) {
+func (bb *BatchBuffer) AddToBatch(msg kafka.Message, onBatchClear func(int, []kafka.Message) error) (err error) {
 	if len(bb.underlying) >= bb.capacity {
-		bb.ClearBuffer(onBatchClear, false)
+		if err = bb.ClearBuffer(onBatchClear, false); err != nil {
+			return err
+		}
 	}
 	windowId := getWindowId(bb.startMillis, int(msg.Time.UnixMilli()), bb.timeWindowSizeMillis)
 	batch := bb.underlying[windowId]
 	bb.underlying[windowId] = append(batch, msg)
 	log.Printf("[BatchBuffer] adding kafka msg %s to buffer for key %d; number of msgs for %d is %d, size of buffer is %d", string(msg.Value), windowId, windowId, len(bb.underlying[windowId]), len(bb.underlying))
+	return nil
 }
 
 // Either removes all batches on timeout which happend when we haven't been receiving any new messages long enough and hence should clear the buffer.
 // or removes all batches except the one corresponding to the latest windowId. onBatchClear is performed on each batch in both cases.
-func (bb *BatchBuffer) ClearBuffer(onBatchClear func(int, []kafka.Message), isTimeout bool) {
+func (bb *BatchBuffer) ClearBuffer(onBatchClear func(int, []kafka.Message) error, isTimeout bool) (err error) {
 	log.Printf("[BatchBuffer] Clearing the buffer... buffer size is %d, timeout is %t", len(bb.underlying), isTimeout)
 	if len(bb.underlying) > 0 {
 		if !isTimeout {
@@ -43,17 +46,22 @@ func (bb *BatchBuffer) ClearBuffer(onBatchClear func(int, []kafka.Message), isTi
 			//lastKey := ascendingKeys[lastIndex]
 			lastBatch := bb.underlying[lastKey]
 			for windowId, batch := range bb.underlying {
-				onBatchClear(windowId, batch)
+				if err = onBatchClear(windowId, batch); err != nil {
+					return err
+				}
 			}
 			clear(bb.underlying)
 			bb.underlying[lastKey] = lastBatch
 		} else {
 			for windowId, batch := range bb.underlying {
-				onBatchClear(windowId, batch)
+				if err = onBatchClear(windowId, batch); err != nil {
+					return err
+				}
 			}
 			clear(bb.underlying)
 		}
 	}
+	return nil
 }
 
 func getWindowId(start int, timestamp int, timeWindowSizeMillis int) int {

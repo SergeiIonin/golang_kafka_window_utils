@@ -31,13 +31,14 @@ func CreateTimeWindowsKafkaService(readerConfig kafka.ReaderConfig, writer *kafk
 	return &TimeWindowsKafkaService{reader, writer, batchBuffer, msgChan}
 }
 
-func (s *TimeWindowsKafkaService) onBatchClear(windowId int, batch []kafka.Message) {
-	s.kafkaWriter.WriteMessages(context.Background(), generateMsgFromBatch(windowId, batch))
+func (s *TimeWindowsKafkaService) onBatchClear(windowId int, batch []kafka.Message) (err error) {
+	return s.kafkaWriter.WriteMessages(context.Background(), generateMsgFromBatch(windowId, batch))
 }
 
 // Runs the service which reads messages from Kafka and aggregates them in time windows.
 func (s *TimeWindowsKafkaService) Run() {
 	mutex := &sync.Mutex{}
+	var err error
 
 	go s.read(s.msgChan)
 
@@ -48,11 +49,14 @@ func (s *TimeWindowsKafkaService) Run() {
 	for {
 		select {
 		case msg := <-s.msgChan:
-			s.batchBuffer.AddToBatch(msg, s.onBatchClear)
-			// time duration of N time windows
+			if err = s.batchBuffer.AddToBatch(msg, s.onBatchClear); err != nil {
+				log.Fatalf("[TWKS] error occurred while adding message to batch buffer: %v", err) // we need exit here because the app is not functional anymore
+			}
 		case <-timer.C:
 			mutex.Lock()
-			s.batchBuffer.ClearBuffer(s.onBatchClear, true)
+			if err = s.batchBuffer.ClearBuffer(s.onBatchClear, true); err != nil {
+				log.Fatalf("[TWKS] error occurred while clearing batch buffer: %v", err) // we need exit here because the app is not functional
+			}
 			timer.Reset(timerDuration)
 			mutex.Unlock()
 		}
