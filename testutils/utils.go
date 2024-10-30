@@ -27,37 +27,37 @@ func MakeTestData(name string, brokers []string, topic string, topicAggregated s
 			},
 		},
 		ReaderConfig: kafka.ReaderConfig{
-			Brokers:  brokers,
-			Topic:    topic,
-			GroupID:  serviceCG,
-			MinBytes: 1, // 1B
-			MaxBytes: 10e6, // 10MB
+			Brokers:        brokers,
+			Topic:          topic,
+			GroupID:        serviceCG,
+			MinBytes:       1,    // 1B
+			MaxBytes:       10e6, // 10MB
 			ReadBackoffMin: 5 * time.Millisecond,
 			ReadBackoffMax: 10 * time.Millisecond,
 			StartOffset:    kafka.FirstOffset,
 		},
 		Writer: &kafka.Writer{
-			Addr:     kafka.TCP(brokers[0]),
-			Topic:    topicAggregated,
+			Addr:            kafka.TCP(brokers[0]),
+			Topic:           topicAggregated,
 			WriteBackoffMin: 1 * time.Millisecond,
 			WriteBackoffMax: 5 * time.Millisecond,
 			BatchTimeout:    1 * time.Millisecond,
 			Balancer:        &kafka.RoundRobin{},
 		},
 		TestWriter: &kafka.Writer{
-			Addr:     kafka.TCP(brokers[0]),
-			Topic:    topic,
+			Addr:            kafka.TCP(brokers[0]),
+			Topic:           topic,
 			WriteBackoffMin: 1 * time.Millisecond,
 			WriteBackoffMax: 5 * time.Millisecond,
 			BatchTimeout:    1 * time.Millisecond,
 			Balancer:        &kafka.RoundRobin{},
 		},
 		TestReaderConfig: kafka.ReaderConfig{
-			Brokers:  brokers,
-			Topic:    topicAggregated,
-			GroupID:  testSG,
-			MinBytes: 1, // 1B
-			MaxBytes: 10e6, // 10MB
+			Brokers:        brokers,
+			Topic:          topicAggregated,
+			GroupID:        testSG,
+			MinBytes:       1,    // 1B
+			MaxBytes:       10e6, // 10MB
 			ReadBackoffMin: 5 * time.Millisecond,
 			ReadBackoffMax: 10 * time.Millisecond,
 			StartOffset:    kafka.FirstOffset,
