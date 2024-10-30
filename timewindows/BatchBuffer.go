@@ -2,7 +2,6 @@ package timewindows
 
 import (
 	"log"
-	"sort"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -17,45 +16,58 @@ type BatchBuffer struct {
 	capacity             int
 }
 
+// Creates a new BatchBuffer with the given parameters
 func CreateBatchBuffer(startMillis int, timeWindowSizeMillis int, capacity int) *BatchBuffer {
 	underlying := make(map[int][]kafka.Message, capacity)
 	return &BatchBuffer{underlying, startMillis, timeWindowSizeMillis, capacity}
 }
 
-func (bb *BatchBuffer) GetWindowId(start int, timestamp int, timeWindowSizeMillis int) int {
+// Adds a message to the buffer, additionally clearing the buffer if it is full.
+func (bb *BatchBuffer) AddToBatch(msg kafka.Message, onBatchClear func(int, []kafka.Message)) {
+	if len(bb.underlying) >= bb.capacity {
+		bb.ClearBuffer(onBatchClear, false)
+	}
+	windowId := getWindowId(bb.startMillis, int(msg.Time.UnixMilli()), bb.timeWindowSizeMillis)
+	batch := bb.underlying[windowId]
+	bb.underlying[windowId] = append(batch, msg)
+	log.Printf("[BatchBuffer] adding kafka msg %s to buffer for key %d; number of msgs for %d is %d, size of buffer is %d", string(msg.Value), windowId, windowId, len(bb.underlying[windowId]), len(bb.underlying))
+}
+
+// Either removes all batches on timeout which happend when we haven't been receiving any new messages long enough and hence should clear the buffer.
+// or removes all batches except the one corresponding to the latest windowId. onBatchClear is performed on each batch in both cases.
+func (bb *BatchBuffer) ClearBuffer(onBatchClear func(int, []kafka.Message), isTimeout bool) {
+	log.Printf("[BatchBuffer] Clearing the buffer... buffer size is %d, timeout is %t", len(bb.underlying), isTimeout)
+	if len(bb.underlying) > 0 {
+		if !isTimeout {
+			lastKey := getLastKey(bb.underlying)
+			//lastKey := ascendingKeys[lastIndex]
+			lastBatch := bb.underlying[lastKey]
+			for windowId, batch := range bb.underlying {
+				onBatchClear(windowId, batch)
+			}
+			clear(bb.underlying)
+			bb.underlying[lastKey] = lastBatch
+		} else {
+			for windowId, batch := range bb.underlying {
+				onBatchClear(windowId, batch)
+			}
+			clear(bb.underlying)
+		}
+	}
+}
+
+func getWindowId(start int, timestamp int, timeWindowSizeMillis int) int {
 	diff := timestamp - start
 	windowId := start + (diff/timeWindowSizeMillis)*timeWindowSizeMillis
 	return windowId
 }
 
-func (bb *BatchBuffer) AddToBatch(msg kafka.Message, onBatchClear func(int, []kafka.Message)) {
-	if len(bb.underlying) >= bb.capacity {
-		bb.ClearBuffer(onBatchClear, false)
+func getLastKey(batches map[int][]kafka.Message) int {
+	max := 0
+	for key := range batches {
+		if key > max {
+			max = key
+		}
 	}
-	windowId := bb.GetWindowId(bb.startMillis, int(msg.Time.UnixMilli()), bb.timeWindowSizeMillis)
-	bb.underlying[windowId] = append(bb.underlying[windowId], msg)
-	log.Printf("[BatchBuffer] adding kafka msg %s to buffer for key %d; number of msgs for %d is %d, size of buffer is %d", string(msg.Value), windowId, windowId, len(bb.underlying[windowId]), len(bb.underlying))
-}
-
-// either removes all batches on timeout (it means that we are not receiving any new messages long enough and we should clear the buffer)
-// or removes all batches except those corresponding to the latest windowId. onBatchClear is performed on each batch in both cases
-func (bb *BatchBuffer) ClearBuffer(onBatchClear func(int, []kafka.Message), isTimeout bool) {
-	log.Printf("[BatchBuffer] Clearing the buffer... buffer size is %d, timeout is %t", len(bb.underlying), isTimeout)
-	ascendingKeys := sortKeys(bb.underlying)
-	if !isTimeout && len(bb.underlying) > 0 {
-		ascendingKeys = ascendingKeys[:len(ascendingKeys)-1]
-	}
-	for _, windowId := range ascendingKeys {
-		onBatchClear(windowId, bb.underlying[windowId])
-		delete(bb.underlying, windowId)
-	}
-}
-
-func sortKeys(batches map[int][]kafka.Message) []int {
-	keys := make([]int, 0, len(batches))
-	for k := range batches {
-		keys = append(keys, k)
-	}
-	sort.Ints(keys)
-	return keys
+	return max
 }
