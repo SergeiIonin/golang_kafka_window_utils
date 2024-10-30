@@ -2,23 +2,25 @@ package testutils
 
 import (
 	"context"
-	"github.com/segmentio/kafka-go"
 	"log"
+	"slices"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/segmentio/kafka-go"
 )
 
 func MakeTestData(name string, brokers []string, topic string, topicAggregated string, partitionsNum int, serviceCG string, testSG string, expectedMsgs []string) TestData {
 	return TestData{
 		Name: name,
 		TopicConfigs: []kafka.TopicConfig{
-			kafka.TopicConfig{
+			{
 				Topic:             topic,
 				NumPartitions:     partitionsNum,
 				ReplicationFactor: 1,
 			},
-			kafka.TopicConfig{
+			{
 				Topic:             topicAggregated,
 				NumPartitions:     1,
 				ReplicationFactor: 1,
@@ -85,6 +87,10 @@ func Produce(writer *kafka.Writer, wg *sync.WaitGroup, writerMsgsInterval time.D
 			Time:  t0,
 		},
 	)
+	if err != nil {
+		log.Println("[producer] failed to write messages:", err)
+		t.Failed()
+	}
 	wg.Done()
 
 	t0 = t0.Add(writerMsgsInterval)
@@ -107,6 +113,10 @@ func Produce(writer *kafka.Writer, wg *sync.WaitGroup, writerMsgsInterval time.D
 			Time:  t0,
 		},
 	)
+	if err != nil {
+		log.Println("[producer] failed to write messages:", err)
+		t.Failed()
+	}
 	wg.Done()
 
 	t0 = t0.Add(writerMsgsInterval)
@@ -134,7 +144,6 @@ func Produce(writer *kafka.Writer, wg *sync.WaitGroup, writerMsgsInterval time.D
 	if err != nil {
 		log.Println("[producer] failed to write messages:", err)
 		t.Failed()
-		//log.Fatal("failed to write messages:", err)
 	}
 	err = writer.Close()
 	if err != nil {
@@ -174,6 +183,7 @@ func Consume(reader *kafka.Reader, msgs []kafka.Message, wg *sync.WaitGroup, t *
 	}()
 }
 
+// Checks if teh messages from expected array all exist in the msgs
 func Equals(t *testing.T, msgs []string, expected []string) bool {
 	if len(msgs) != len(expected) {
 		return false
@@ -193,7 +203,7 @@ func Equals(t *testing.T, msgs []string, expected []string) bool {
 	return true
 }
 
-// what is the purpose exactly?
+// todo simplify
 func Contains(t *testing.T, msgs []string, expected []string) bool {
 	if len(msgs) != len(expected) {
 		return false
@@ -253,13 +263,5 @@ func equals(m1 map[rune]int, m2 map[rune]int) bool {
 }
 
 func IsSorted(offsets []int) bool {
-	if len(offsets) == 0 {
-		return true
-	}
-	for i := 1; i < len(offsets); i++ {
-		if offsets[i] < offsets[i-1] {
-			return false
-		}
-	}
-	return true
+	return slices.IsSorted(offsets)
 }

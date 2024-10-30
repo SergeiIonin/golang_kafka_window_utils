@@ -26,7 +26,7 @@ func init() {
 	if err != nil {
 		log.Fatalf("error creating docker client: %s", err.Error())
 	}
-	containerId, err = testutils.CreateKafkaWithKRaftContainer(dockerClient)
+	containerId, err = testutils.CreateKafkaWithKRaftContainer(dockerClient, kafkaAddr)
 	if err != nil {
 		log.Fatalf("could not create container %v", err)
 	}
