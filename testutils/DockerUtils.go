@@ -12,13 +12,14 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-func CleanupAndGracefulShutdown(t *testing.T, dockerClient *client.Client, containerId string) {
-	if err := GracefulShutdown(dockerClient, containerId); err != nil {
+// Shutdowns the container gracefully or fails the test in case of the error
+func ContainerGracefulShutdown(t *testing.T, dockerClient *client.Client, containerId string) {
+	if err := gracefulShutdown(dockerClient, containerId); err != nil {
 		t.Fatalf("could not remove container %v, consider deleting it manually!", err)
 	}
 }
 
-func GracefulShutdown(dockerClient *client.Client, containerId string) error {
+func gracefulShutdown(dockerClient *client.Client, containerId string) error {
 	log.Printf("Removing container %s \n", containerId)
 	inspection, err := dockerClient.ContainerInspect(context.Background(), containerId)
 	if err != nil {
@@ -27,11 +28,24 @@ func GracefulShutdown(dockerClient *client.Client, containerId string) error {
 	}
 
 	if !inspection.State.Running {
-		return nil
+		log.Printf("Container %s is not running, proceeding to remove it.\n", containerId)
+		return removeContainer(dockerClient, containerId)
 	}
 
-	if err = dockerClient.ContainerRemove(context.Background(), containerId, container.RemoveOptions{Force: true}); err != nil {
-		log.Printf("could not remove container %v, consider deleting it manually!", err)
+	log.Printf("Stopping container %s \n", containerId)
+	timeout := 5
+	if err = dockerClient.ContainerStop(context.Background(), containerId, container.StopOptions{Timeout: &timeout}); err != nil {
+		log.Printf("Could not stop container %v, consider deleting it manually!", err)
+		return err
+	}
+
+	return removeContainer(dockerClient, containerId)
+}
+
+func removeContainer(dockerClient *client.Client, containerId string) error {
+	log.Printf("Removing container %s \n", containerId)
+	if err := dockerClient.ContainerRemove(context.Background(), containerId, container.RemoveOptions{Force: true}); err != nil {
+		log.Printf("Could not remove container %v, consider deleting it manually!", err)
 		return err
 	}
 	return nil
@@ -45,20 +59,21 @@ func waitKafkaIsUp() error {
 		Transport: nil,
 	}
 
+	timerDuration := time.Duration(1) * time.Second
+	timer := time.NewTimer(timerDuration)
+
 	for {
 		select {
 		case <-ctx.Done():
 			cancel()
 			return ctx.Err()
-		default:
+		case <-timer.C:
 			log.Println("WAITING FOR KAFKA TO BE READY...")
-			// for some reason Heartbeat request is not enough: even if it's successful,
-			// the client may fail to creata topic
-			resp, err := kafkaClient.Metadata(ctx, &kafka.MetadataRequest{
+			resp, err := kafkaClient.Metadata(ctx, &kafka.MetadataRequest{ // for some reason Heartbeat request is not enough: even if it's successful, the client may fail to create a topic
 				Addr: kafkaAddr,
 			})
 			if resp == nil || err != nil {
-				time.Sleep(1 * time.Second)
+				timer.Reset(timerDuration)
 				continue
 			}
 			cancel()
@@ -67,6 +82,7 @@ func waitKafkaIsUp() error {
 	}
 }
 
+// Creates a Kafka container in KRaft mode
 func CreateKafkaWithKRaftContainer(dockerClient *client.Client) (id string, err error) {
 	ctx := context.Background()
 

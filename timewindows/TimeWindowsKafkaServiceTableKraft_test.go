@@ -33,11 +33,9 @@ func init() {
 
 	log.Printf("Container ID: %s", containerId)
 }
-
-// fixme two test don't pass together, probably multiple partitions test is not working properly
 func TestTWKSTableKraft_test(t *testing.T) {
 	cleanup := func() {
-		testutils.CleanupAndGracefulShutdown(t, dockerClient, containerId)
+		testutils.ContainerGracefulShutdown(t, dockerClient, containerId)
 	}
 
 	//defer cleanup() // fixme it'd be great to rm containers in case t.Cleanup won't affect them
